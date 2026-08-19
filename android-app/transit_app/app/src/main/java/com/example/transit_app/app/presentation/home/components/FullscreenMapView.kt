@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TripOrigin
@@ -12,9 +13,15 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.graphics.toColorInt
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.transit_app.app.presentation.home.utils.FusedLocationProvider
+import com.example.transit_app.app.presentation.home.utils.RouteResult
 import com.example.transit_app.app.presentation.home.utils.fetchRouteFromOSRM
 import org.osmdroid.config.Configuration
 import org.osmdroid.events.MapEventsReceiver
@@ -26,8 +33,9 @@ import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.MapEventsOverlay
 import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.Polyline
-import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
+import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
+import java.util.Locale
 
 @Composable
 fun FullscreenMapView(
@@ -37,42 +45,68 @@ fun FullscreenMapView(
     onRouteError: (String) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     val sharedPreferences = context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
     Configuration.getInstance().load(context, sharedPreferences)
     Configuration.getInstance().userAgentValue = "RouteScapeMVP/1.0"
 
     var mapViewRef by remember { mutableStateOf<MapView?>(null) }
+    var locationOverlayRef by remember { mutableStateOf<MyLocationNewOverlay?>(null) }
 
+    var liveUserLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var startLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var destinationLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var pendingLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var showSelectionDialog by remember { mutableStateOf(false) }
-    var routePoints by remember { mutableStateOf<List<GeoPoint>>(emptyList()) }
+
+    var routeData by remember { mutableStateOf(RouteResult()) }
     val defaultAnchor = remember { GeoPoint(28.60882, 77.03588) }
+
+    // Lifecycle observer to save battery when app is in the background
+    DisposableEffect(lifecycleOwner, locationOverlayRef) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> locationOverlayRef?.enableMyLocation()
+                Lifecycle.Event.ON_PAUSE -> locationOverlayRef?.disableMyLocation()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            locationOverlayRef?.disableMyLocation()
+        }
+    }
 
     LaunchedEffect(selectedLocation) {
         if (selectedLocation != null) {
             destinationLocation = selectedLocation
             if ((startLocation == null) && (mapViewRef != null)) {
                 val gpsOverlay = mapViewRef!!.overlays.asSequence().filterIsInstance<MyLocationNewOverlay>().firstOrNull()
-                startLocation = gpsOverlay?.myLocation ?: defaultAnchor
+                startLocation = gpsOverlay?.myLocation ?: liveUserLocation ?: defaultAnchor
             }
         }
     }
 
-    LaunchedEffect(startLocation, destinationLocation) {
-        val start = startLocation
+    LaunchedEffect(startLocation, liveUserLocation, destinationLocation) {
+        val start = startLocation ?: liveUserLocation ?: defaultAnchor
         val dest = destinationLocation
-        if (start != null && dest != null) {
+        if (dest != null) {
             val result = fetchRouteFromOSRM(start, dest)
-            if (result.isNotEmpty()) {
-                routePoints = result
+
+            if (result.points.isNotEmpty()) {
+                routeData = result
             } else {
-                routePoints = listOf(start, dest)
-                onRouteError("Unable to fetch street route. Showing straight line.")
+                // Fallback to straight-line connection if network fails
+                routeData = RouteResult(points = listOf(start, dest))
+
+                // Show the specific offline message we generated in RouteHelper
+                val errorMsg = result.errorMessage ?: "Unable to calculate route."
+                onRouteError(errorMsg)
             }
         } else {
-            routePoints = emptyList()
+            routeData = RouteResult()
         }
     }
 
@@ -108,9 +142,20 @@ fun FullscreenMapView(
                     }
                     overlays.add(MapEventsOverlay(mReceive))
 
-                    val locationOverlay = MyLocationNewOverlay(GpsMyLocationProvider(ctx), this)
+                    val fusedProvider = FusedLocationProvider(ctx)
+                    val locationOverlay = object : MyLocationNewOverlay(fusedProvider, this) {
+                        override fun onLocationChanged(location: android.location.Location?, source: IMyLocationProvider?) {
+                            super.onLocationChanged(location, source)
+                            if (location != null) {
+                                liveUserLocation = GeoPoint(location.latitude, location.longitude)
+                            }
+                        }
+                    }
+
+                    locationOverlay.isDrawAccuracyEnabled = true
                     locationOverlay.enableMyLocation()
                     overlays.add(locationOverlay)
+                    locationOverlayRef = locationOverlay
 
                     controller.setZoom(15.0)
                     controller.setCenter(defaultAnchor)
@@ -120,9 +165,12 @@ fun FullscreenMapView(
             },
             update = { mapView ->
                 if (triggerUserCentering) {
-                    val gpsOverlay = mapView.overlays.filterIsInstance<MyLocationNewOverlay>().firstOrNull()
-                    gpsOverlay?.myLocation?.let { liveLocation ->
-                        mapView.controller.animateTo(liveLocation)
+                    val targetLocation = liveUserLocation ?: mapView.overlays.asSequence().filterIsInstance<MyLocationNewOverlay>().firstOrNull()?.myLocation
+
+                    targetLocation?.let { liveLocation ->
+                        // 18.0 is a close street-level zoom.
+                        // 1000L is the animation duration in milliseconds.
+                        mapView.controller.animateTo(liveLocation, 18.0, 1000L)
                     }
                     onCenteringComplete()
                 }
@@ -153,18 +201,18 @@ fun FullscreenMapView(
                     mapView.overlays.add(destMarker)
                 }
 
-                if (routePoints.isNotEmpty()) {
+                if (routeData.points.isNotEmpty()) {
                     val routeLine = Polyline(mapView).apply {
                         outlinePaint.color = "#1976D2".toColorInt()
                         outlinePaint.strokeWidth = 12f
-                        setPoints(routePoints)
+                        setPoints(routeData.points)
                     }
                     mapView.overlays.add(routeLine)
 
                     try {
-                        val boundingBox = BoundingBox.fromGeoPoints(routePoints)
+                        val boundingBox = BoundingBox.fromGeoPoints(routeData.points)
                         mapView.zoomToBoundingBox(boundingBox, true, 140)
-                    } catch (e: Exception) {
+                    } catch (_: Exception) {
                         destinationLocation?.let { mapView.controller.animateTo(it) }
                     }
                 }
@@ -192,6 +240,45 @@ fun FullscreenMapView(
                 modifier = Modifier.size(40.dp)
             ) {
                 Icon(Icons.Default.Remove, contentDescription = "Zoom Out")
+            }
+        }
+
+        // Floating Distance & ETA Badge
+        if (routeData.distanceMeters > 0) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 130.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = "Travel Info",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    val formattedDistance = if (routeData.distanceMeters >= 1000) {
+                        String.format(Locale.getDefault(), "%.1f km", routeData.distanceMeters / 1000)
+                    } else {
+                        "${routeData.distanceMeters.toInt()} m"
+                    }
+
+                    val minutes = (routeData.durationSeconds / 60).toInt()
+                    val formattedTime = if (minutes > 60) "${minutes / 60} hr ${minutes % 60} min" else "$minutes min"
+
+                    Text(
+                        text = "$formattedDistance • $formattedTime",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                }
             }
         }
 

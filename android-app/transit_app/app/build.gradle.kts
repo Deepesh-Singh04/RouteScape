@@ -54,13 +54,18 @@ dependencies {
     // OpenStreetMap for Android
     implementation("org.osmdroid:osmdroid-android:6.1.18")
 
-    // Retrofit & Gson Converter for REST API calls
+// Retrofit & Gson Converter for REST API calls
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
-    // Lifecycle & ViewModel for Jetpack Compose
+// Lifecycle & ViewModel for Jetpack Compose
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.0")
+// NEW: Required to use LocalLifecycleOwner for our map's battery-saving observer
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.0")
 
-    // Extended Material Icons (for Train, ElectricRickshaw, etc.)
+// Extended Material Icons (for Train, ElectricRickshaw, etc.)
     implementation("androidx.compose.material:material-icons-extended")
+
+// Google Play Services for Optimal Fused Location Tracking
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }
