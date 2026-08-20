@@ -1,6 +1,7 @@
 package com.example.transit_app.app.presentation.home.components
 
 import android.content.Context
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -46,6 +47,7 @@ fun FullscreenMapView(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val isDarkTheme = isSystemInDarkTheme()
 
     val sharedPreferences = context.getSharedPreferences("osmdroid", Context.MODE_PRIVATE)
     Configuration.getInstance().load(context, sharedPreferences)
@@ -63,7 +65,6 @@ fun FullscreenMapView(
     var routeData by remember { mutableStateOf(RouteResult()) }
     val defaultAnchor = remember { GeoPoint(28.60882, 77.03588) }
 
-    // Lifecycle observer to save battery when app is in the background
     DisposableEffect(lifecycleOwner, locationOverlayRef) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -98,10 +99,7 @@ fun FullscreenMapView(
             if (result.points.isNotEmpty()) {
                 routeData = result
             } else {
-                // Fallback to straight-line connection if network fails
                 routeData = RouteResult(points = listOf(start, dest))
-
-                // Show the specific offline message we generated in RouteHelper
                 val errorMsg = result.errorMessage ?: "Unable to calculate route."
                 onRouteError(errorMsg)
             }
@@ -115,10 +113,11 @@ fun FullscreenMapView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 MapView(ctx).apply {
+                    val tileUrl = if (isDarkTheme) "https://a.basemaps.cartocdn.com/dark_all/" else "https://a.basemaps.cartocdn.com/light_all/"
                     val cartoDbSource = XYTileSource(
                         "CartoDB",
                         1, 20, 256, ".png",
-                        arrayOf("https://a.basemaps.cartocdn.com/light_all/")
+                        arrayOf(tileUrl)
                     )
                     setTileSource(cartoDbSource)
                     setMultiTouchControls(true)
@@ -164,12 +163,13 @@ fun FullscreenMapView(
                 }
             },
             update = { mapView ->
+                val tileUrl = if (isDarkTheme) "https://a.basemaps.cartocdn.com/dark_all/" else "https://a.basemaps.cartocdn.com/light_all/"
+                mapView.setTileSource(XYTileSource("CartoDB", 1, 20, 256, ".png", arrayOf(tileUrl)))
+
                 if (triggerUserCentering) {
                     val targetLocation = liveUserLocation ?: mapView.overlays.asSequence().filterIsInstance<MyLocationNewOverlay>().firstOrNull()?.myLocation
 
                     targetLocation?.let { liveLocation ->
-                        // 18.0 is a close street-level zoom.
-                        // 1000L is the animation duration in milliseconds.
                         mapView.controller.animateTo(liveLocation, 18.0, 1000L)
                     }
                     onCenteringComplete()
@@ -202,11 +202,24 @@ fun FullscreenMapView(
                 }
 
                 if (routeData.points.isNotEmpty()) {
+                    val routeColor = if (isDarkTheme) "#38BDF8" else "#2563EB"
                     val routeLine = Polyline(mapView).apply {
-                        outlinePaint.color = "#1976D2".toColorInt()
-                        outlinePaint.strokeWidth = 12f
+                        outlinePaint.color = routeColor.toColorInt()
+                        outlinePaint.strokeWidth = 14f
+                        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
                         setPoints(routeData.points)
                     }
+
+                    val casingLine = Polyline(mapView).apply {
+                        outlinePaint.color = if (isDarkTheme) "#1AFFFFFF".toColorInt() else "#1A000000".toColorInt()
+                        outlinePaint.strokeWidth = 20f
+                        outlinePaint.strokeCap = android.graphics.Paint.Cap.ROUND
+                        outlinePaint.strokeJoin = android.graphics.Paint.Join.ROUND
+                        setPoints(routeData.points)
+                    }
+
+                    mapView.overlays.add(casingLine)
                     mapView.overlays.add(routeLine)
 
                     try {
@@ -228,26 +241,27 @@ fun FullscreenMapView(
         ) {
             FloatingActionButton(
                 onClick = { mapViewRef?.controller?.zoomIn() },
+                containerColor = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.size(40.dp)
             ) {
-                Icon(Icons.Default.Add, contentDescription = "Zoom In")
+                Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = MaterialTheme.colorScheme.onSurface)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
             FloatingActionButton(
                 onClick = { mapViewRef?.controller?.zoomOut() },
+                containerColor = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.size(40.dp)
             ) {
-                Icon(Icons.Default.Remove, contentDescription = "Zoom Out")
+                Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = MaterialTheme.colorScheme.onSurface)
             }
         }
 
-        // Floating Distance & ETA Badge
         if (routeData.distanceMeters > 0) {
             Card(
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
-                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 130.dp)
@@ -259,7 +273,7 @@ fun FullscreenMapView(
                     Icon(
                         imageVector = Icons.Default.DirectionsCar,
                         contentDescription = "Travel Info",
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                        tint = MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(8.dp))
 
@@ -275,7 +289,7 @@ fun FullscreenMapView(
                     Text(
                         text = "$formattedDistance • $formattedTime",
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodyLarge
                     )
                 }
@@ -288,6 +302,7 @@ fun FullscreenMapView(
                     showSelectionDialog = false
                     pendingLocation = null
                 },
+                containerColor = MaterialTheme.colorScheme.surface,
                 icon = {
                     Icon(
                         imageVector = Icons.Default.Place,
@@ -295,8 +310,8 @@ fun FullscreenMapView(
                         tint = MaterialTheme.colorScheme.primary
                     )
                 },
-                title = { Text(text = "Selected Point Action") },
-                text = { Text("Choose how you want to use this pinned location:") },
+                title = { Text(text = "Selected Point Action", color = MaterialTheme.colorScheme.onSurface) },
+                text = { Text("Choose how you want to use this pinned location:", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                 confirmButton = {
                     Column(
                         modifier = Modifier.fillMaxWidth(),
@@ -335,7 +350,7 @@ fun FullscreenMapView(
                             },
                             modifier = Modifier.align(Alignment.End)
                         ) {
-                            Text("Cancel")
+                            Text("Cancel", color = MaterialTheme.colorScheme.onSurface)
                         }
                     }
                 }

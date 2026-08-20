@@ -117,6 +117,9 @@ fun HomeScreen(
                     query = searchQuery,
                     onQueryChange = { searchQuery = it },
                     onMenuClick = { scope.launch { drawerState.open() } },
+                    onLocationSelected = { destinationGeoPoint ->
+                        selectedLocation = destinationGeoPoint
+                    },
                     modifier = Modifier
                         .align(Alignment.TopCenter)
                         .padding(top = 48.dp, start = 16.dp, end = 16.dp)
