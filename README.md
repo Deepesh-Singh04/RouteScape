@@ -47,11 +47,20 @@ The backend is currently deployed and hosted live on Render.
 
 **Option B: Local Development (For testing only)**
 If you wish to run the server locally on your own machine:
-1. Install dependencies: `pip install fastapi uvicorn sqlmodel`
-2. Navigate to the backend directory: `cd backend`
-3. Seed the local database: `python seed_heritage.py`
-4. Start the server: `uvicorn main:app --reload`
-5. The local server will run on `http://127.0.0.1:8000`.
+
+1. Install dependencies:
+   ```bash
+   pip install fastapi uvicorn sqlmodel
+2. Navigate to the backend directory:
+   ```bash
+   cd backend
+3. Seed the local database:
+   ```bash
+   python seed_heritage.py
+4. Start the server:
+   ```bash
+   uvicorn main:app --reload
+5. The local server will run on http://127.0.0.1:8000.
 
 ### 2. Frontend App (Android Studio)
 1. Open the `android-app` folder in Android Studio.
@@ -60,4 +69,5 @@ If you wish to run the server locally on your own machine:
     * To use the live cloud data, set `BASE_URL = "https://routescape-backend.onrender.com/"`
     * To use a local testing server, set `BASE_URL = "http://10.0.2.2:8000/"`
 4. Launch an Android Emulator or connect a physical device and click **Run**.
+
 Author: Deepesh Singh, Deependra Pratap Singh.
