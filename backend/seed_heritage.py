@@ -4,6 +4,54 @@ from models import Place
 
 heritage_data = [
     {
+        "name": "Shri Dudheshwar Nath Mandir",
+        "latitude": 28.6655,
+        "longitude": 77.4246,
+        "category": "heritage",
+        "distance_meters": 4500,
+        "type": "historic_temple"
+    },
+    {
+        "name": "Ghanta Ghar (Clock Tower)",
+        "latitude": 28.6625,
+        "longitude": 77.4278,
+        "category": "heritage",
+        "distance_meters": 3800,
+        "type": "monument"
+    },
+    {
+        "name": "Pracheen Shiv Mandir (Lal Kuan)",
+        "latitude": 28.6290,
+        "longitude": 77.4480,
+        "category": "heritage",
+        "distance_meters": 500,
+        "type": "temple"
+    },
+    {
+        "name": "Shri Siddh Pith Balaji Mandir",
+        "latitude": 28.6362,
+        "longitude": 77.4470,
+        "category": "heritage",
+        "distance_meters": 400,
+        "type": "temple"
+    },
+    {
+        "name": "Bhairavnath Mandir (Chipyana)",
+        "latitude": 28.6180,
+        "longitude": 77.4380,
+        "category": "heritage",
+        "distance_meters": 2100,
+        "type": "temple"
+    },
+    {
+        "name": "Dasna Fort Ruins",
+        "latitude": 28.6750,
+        "longitude": 77.5250,
+        "category": "heritage",
+        "distance_meters": 8500,
+        "type": "ruins"
+    },
+    {
         "name": "Loharehri Baoli (Dwarka Stepwell)",
         "latitude": 28.5954,
         "longitude": 77.0423,
