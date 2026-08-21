@@ -1,11 +1,18 @@
 package com.example.transit_app.app.presentation.home.components
 
 import android.content.Context
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.DirectionsCar
+import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.TripOrigin
@@ -44,6 +51,7 @@ fun FullscreenMapView(
     triggerUserCentering: Boolean,
     onCenteringComplete: () -> Unit,
     onRouteError: (String) -> Unit = {},
+    onLiveLocationUpdate: (GeoPoint) -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -63,7 +71,7 @@ fun FullscreenMapView(
     var showSelectionDialog by remember { mutableStateOf(false) }
 
     var routeData by remember { mutableStateOf(RouteResult()) }
-    val defaultAnchor = remember { GeoPoint(28.60882, 77.03588) }
+    val defaultAnchor = remember { GeoPoint(28.6692, 77.4538) }
 
     DisposableEffect(lifecycleOwner, locationOverlayRef) {
         val observer = LifecycleEventObserver { _, event ->
@@ -108,6 +116,13 @@ fun FullscreenMapView(
         }
     }
 
+    LaunchedEffect(triggerUserCentering, liveUserLocation) {
+        if (triggerUserCentering && liveUserLocation != null) {
+            mapViewRef?.controller?.animateTo(liveUserLocation, 18.0, 1000L)
+            onCenteringComplete()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
@@ -146,18 +161,31 @@ fun FullscreenMapView(
                         override fun onLocationChanged(location: android.location.Location?, source: IMyLocationProvider?) {
                             super.onLocationChanged(location, source)
                             if (location != null) {
-                                liveUserLocation = GeoPoint(location.latitude, location.longitude)
+                                val newGeoPoint = GeoPoint(location.latitude, location.longitude)
+                                liveUserLocation = newGeoPoint
+                                onLiveLocationUpdate(newGeoPoint)
                             }
                         }
                     }
 
                     locationOverlay.isDrawAccuracyEnabled = true
                     locationOverlay.enableMyLocation()
+
+                    locationOverlay.runOnFirstFix {
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            controller.animateTo(locationOverlay.myLocation, 18.0, 1000L)
+                            liveUserLocation = locationOverlay.myLocation
+                            onCenteringComplete()
+                        }
+                    }
+
                     overlays.add(locationOverlay)
                     locationOverlayRef = locationOverlay
 
                     controller.setZoom(15.0)
-                    controller.setCenter(defaultAnchor)
+
+                    val initialCenter = liveUserLocation ?: locationOverlay.myLocation ?: defaultAnchor
+                    controller.setCenter(initialCenter)
 
                     mapViewRef = this
                 }
@@ -169,10 +197,10 @@ fun FullscreenMapView(
                 if (triggerUserCentering) {
                     val targetLocation = liveUserLocation ?: mapView.overlays.asSequence().filterIsInstance<MyLocationNewOverlay>().firstOrNull()?.myLocation
 
-                    targetLocation?.let { liveLocation ->
-                        mapView.controller.animateTo(liveLocation, 18.0, 1000L)
+                    if (targetLocation != null) {
+                        mapView.controller.animateTo(targetLocation, 18.0, 1000L)
+                        onCenteringComplete()
                     }
-                    onCenteringComplete()
                 }
 
                 mapView.overlays.removeAll {
@@ -234,53 +262,61 @@ fun FullscreenMapView(
             }
         )
 
-        Column(
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+            shadowElevation = 4.dp,
             modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 380.dp)
+                .align(Alignment.CenterEnd)
+                .padding(end = 16.dp)
         ) {
-            FloatingActionButton(
-                onClick = { mapViewRef?.controller?.zoomIn() },
-                containerColor = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = MaterialTheme.colorScheme.onSurface)
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            FloatingActionButton(
-                onClick = { mapViewRef?.controller?.zoomOut() },
-                containerColor = MaterialTheme.colorScheme.surface,
-                modifier = Modifier.size(40.dp)
-            ) {
-                Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = MaterialTheme.colorScheme.onSurface)
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                IconButton(onClick = { mapViewRef?.controller?.zoomIn() }) {
+                    Icon(Icons.Default.Add, contentDescription = "Zoom In", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                HorizontalDivider(modifier = Modifier.width(32.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                IconButton(onClick = { mapViewRef?.controller?.zoomOut() }) {
+                    Icon(Icons.Default.Remove, contentDescription = "Zoom Out", tint = MaterialTheme.colorScheme.onSurface)
+                }
+                HorizontalDivider(modifier = Modifier.width(32.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                IconButton(
+                    onClick = {
+                        liveUserLocation?.let { mapViewRef?.controller?.animateTo(it, 18.0, 1000L) }
+                    }
+                ) {
+                    Icon(Icons.Default.MyLocation, contentDescription = "My Location", tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
 
-        if (routeData.distanceMeters > 0) {
+        AnimatedVisibility(
+            visible = routeData.distanceMeters > 0,
+            enter = slideInVertically(initialOffsetY = { -it / 2 }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it / 2 }) + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = 130.dp)
+        ) {
             Card(
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
-                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 130.dp)
+                elevation = CardDefaults.cardElevation(defaultElevation = 6.dp),
+                shape = RoundedCornerShape(24.dp)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.DirectionsCar,
                         contentDescription = "Travel Info",
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
                     val formattedDistance = if (routeData.distanceMeters >= 1000) {
-                        String.format(Locale.getDefault(), "%.1f km", routeData.distanceMeters / 1000)
+                        String.format(Locale.getDefault(), "%.1f km", routeData.distanceMeters / 1000f)
                     } else {
-                        "${routeData.distanceMeters.toInt()} m"
+                        "${routeData.distanceMeters} m"
                     }
 
                     val minutes = (routeData.durationSeconds / 60).toInt()
@@ -290,7 +326,7 @@ fun FullscreenMapView(
                         text = "$formattedDistance • $formattedTime",
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.bodyLarge
+                        style = MaterialTheme.typography.titleMedium
                     )
                 }
             }

@@ -24,24 +24,16 @@ class HomeViewModel : ViewModel() {
     // The public state that the UI observes
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
-    init {
-        // Fetch data immediately when the screen loads
-        fetchExploreData()
-    }
-
-    fun fetchExploreData() {
-        // Launch a coroutine to do network work in the background
+    fun fetchExploreData(lat: Double, lon: Double) {
         viewModelScope.launch {
             _uiState.value = HomeUiState.Loading
             try {
-                // Try to get the JSON from the Python backend
-                val response = ApiClient.apiService.getExploreData()
-
-                // If successful, update the state with the new data
+                // Pass the coordinates to the new endpoint
+                val response = ApiClient.apiService.getExploreData(lat, lon)
                 _uiState.value = HomeUiState.Success(response)
             } catch (e: Exception) {
-                // If the server is down or there's an error, show the error message
-                _uiState.value = HomeUiState.Error(e.localizedMessage ?: "Failed to connect to backend")
+                e.printStackTrace()
+                _uiState.value = HomeUiState.Error("Failed to load data: ${e.message}")
             }
         }
     }

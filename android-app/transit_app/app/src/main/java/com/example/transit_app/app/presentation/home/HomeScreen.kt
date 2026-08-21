@@ -11,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.ElectricRickshaw
-import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Train
 import androidx.compose.material3.*
@@ -27,7 +26,9 @@ import com.example.transit_app.app.presentation.home.components.FullscreenMapVie
 import com.example.transit_app.app.presentation.home.models.DisplayCardItem
 import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
+import android.annotation.SuppressLint
 
+@SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel()
@@ -38,7 +39,8 @@ fun HomeScreen(
 
     var searchQuery by remember { mutableStateOf("") }
     var selectedLocation by remember { mutableStateOf<GeoPoint?>(null) }
-    var triggerUserCentering by remember { mutableStateOf(false) }
+    var triggerUserCentering by remember { mutableStateOf(true) }
+    var hasFetchedInitialData by remember { mutableStateOf(false) }
 
     val uiState by viewModel.uiState.collectAsState()
 
@@ -85,9 +87,7 @@ fun HomeScreen(
             snackbarHost = { SnackbarHost(snackbarHostState) }
         ) { paddingValues ->
             Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(paddingValues)
+                modifier = Modifier.fillMaxSize()
             ) {
                 FullscreenMapView(
                     selectedLocation = selectedLocation,
@@ -95,6 +95,12 @@ fun HomeScreen(
                     onCenteringComplete = { triggerUserCentering = false },
                     onRouteError = { msg ->
                         scope.launch { snackbarHostState.showSnackbar(msg) }
+                    },
+                    onLiveLocationUpdate = { geoPoint ->
+                        if (!hasFetchedInitialData) {
+                            viewModel.fetchExploreData(geoPoint.latitude, geoPoint.longitude)
+                            hasFetchedInitialData = true
+                        }
                     }
                 )
 
@@ -122,27 +128,15 @@ fun HomeScreen(
                     },
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .padding(top = 48.dp, start = 16.dp, end = 16.dp)
+                        .statusBarsPadding()
+                        .padding(top = 16.dp, start = 16.dp, end = 16.dp)
                 )
-
-                FloatingActionButton(
-                    onClick = { triggerUserCentering = true },
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 140.dp, end = 16.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MyLocation,
-                        contentDescription = "My Location",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
 
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
+                        .navigationBarsPadding()
                         .padding(bottom = 24.dp)
                 ) {
                     when (val state = uiState) {
@@ -172,9 +166,9 @@ fun HomeScreen(
                                     list.add(
                                         DisplayCardItem(
                                             title = option.name,
-                                            subtitle = "${option.distance_meters}m • ${option.status}",
+                                            subtitle = "${option.distanceMeters ?: 0}m • ${option.status ?: "Unknown"}",
                                             icon = if (option.type == "metro") Icons.Default.Train else Icons.Default.ElectricRickshaw,
-                                            geoPoint = GeoPoint(option.coordinates.lat, option.coordinates.lng)
+                                            geoPoint = GeoPoint(option.latitude, option.longitude)
                                         )
                                     )
                                 }
@@ -182,9 +176,9 @@ fun HomeScreen(
                                     list.add(
                                         DisplayCardItem(
                                             title = site.name,
-                                            subtitle = "${site.distance_meters}m • ${site.category}",
+                                            subtitle = "${site.distanceMeters ?: 0}m • ${site.category}",
                                             icon = Icons.Default.AccountBalance,
-                                            geoPoint = GeoPoint(site.coordinates.lat, site.coordinates.lng)
+                                            geoPoint = GeoPoint(site.latitude, site.longitude)
                                         )
                                     )
                                 }

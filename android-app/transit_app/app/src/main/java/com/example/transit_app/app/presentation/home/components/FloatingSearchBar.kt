@@ -62,7 +62,7 @@ fun FloatingSearchBar(
         OutlinedTextField(
             value = query,
             onValueChange = onQueryChange,
-            placeholder = { Text("Search NSUT & Dwarka", color = MaterialTheme.colorScheme.onSurfaceVariant) },
+            placeholder = { Text("Search new Location", color = MaterialTheme.colorScheme.onSurfaceVariant) },
             leadingIcon = {
                 IconButton(onClick = onMenuClick) {
                     Icon(Icons.Default.Menu, contentDescription = "Menu", tint = MaterialTheme.colorScheme.onSurface)
