@@ -1,39 +1,55 @@
-from fastapi import FastAPI, Depends, HTTPException
-from sqlmodel import Session, select
-from database import create_db_and_tables, get_session
-from models import Place, PlaceCreate
+import httpx
+from fastapi import FastAPI
+from typing import List, Optional
+from pydantic import BaseModel
 
 app = FastAPI()
 
-@app.on_event("startup")
-def on_startup():
-    create_db_and_tables()
+class PlaceDto(BaseModel):
+    id: int
+    name: str
+    latitude: float
+    longitude: float
+    category: str
+    type: Optional[str] = None
+    distance_meters: Optional[int] = None
 
-@app.post("/places/", response_model=Place)
-def create_place(place: PlaceCreate, session: Session = Depends(get_session)):
-    db_place = Place.from_orm(place)
-    session.add(db_place)
-    session.commit()
-    session.refresh(db_place)
-    return db_place
+class DynamicDataResponse(BaseModel):
+    transit_options: List[PlaceDto] = []
+    heritage_sites: List[PlaceDto] = []
 
-@app.get("/places/", response_model=list[Place])
-def read_places(category: str = None, session: Session = Depends(get_session)):
-    query = select(Place)
-    if category:
-        query = query.where(Place.category == category)
-    places = session.exec(query).all()
-    return places
-
-@app.get("/home-data/")
-def get_home_data(session: Session = Depends(get_session)):
-    transit_query = select(Place).where(Place.category == "transit")
-    heritage_query = select(Place).where(Place.category == "heritage")
+@app.get("/explore/", response_model=DynamicDataResponse)
+async def get_explore_data(lat: float, lon: float, radius: int = 5000):
+    query = f"""
+    [out:json];
+    (
+      node["historic"](around:{radius},{lat},{lon});
+      way["historic"](around:{radius},{lat},{lon});
+    );
+    out center;
+    """
+    url = "http://overpass-api.de/api/interpreter"
     
-    transit_options = session.exec(transit_query).all()
-    heritage_sites = session.exec(heritage_query).all()
-    
-    return {
-        "transit_options": transit_options,
-        "heritage_sites": heritage_sites
-    }
+    async with httpx.AsyncClient() as client:
+        response = await client.post(url, data={"data": query}, timeout=20.0)
+        osm_data = response.json()
+        
+    heritage_sites = []
+    for element in osm_data.get("elements", []):
+        tags = element.get("tags", {})
+        if "name" not in tags:
+            continue
+            
+        element_lat = element.get("lat") or element.get("center", {}).get("lat")
+        element_lon = element.get("lon") or element.get("center", {}).get("lon")
+        
+        heritage_sites.append(PlaceDto(
+            id=element["id"],
+            name=tags["name"],
+            latitude=element_lat,
+            longitude=element_lon,
+            category="heritage",
+            type=tags.get("historic")
+        ))
+        
+    return DynamicDataResponse(heritage_sites=heritage_sites)
