@@ -1,4 +1,5 @@
 import httpx
+import math
 from fastapi import FastAPI
 from typing import List, Optional
 from pydantic import BaseModel
@@ -22,12 +23,23 @@ class DynamicDataResponse(BaseModel):
     heritage_sites: List[PlaceDto] = []
 
 @app.get("/home-data/", response_model=DynamicDataResponse)
-def get_home_data(lat: Optional[float] = None, lon: Optional[float] = None):
+def get_home_data(lat: Optional[float] = None, lon: Optional[float] = None, radius: int = 25000):
     with Session(engine) as session:
         places = session.exec(select(Place)).all()
         
     heritage_sites = []
     for p in places:
+        # If the Android app sends GPS coordinates, calculate the real distance
+        if lat is not None and lon is not None:
+            actual_distance = calculate_distance(lat, lon, p.latitude, p.longitude)
+            
+            # Skip this place if it is outside our 25km search radius
+            if actual_distance > radius:
+                continue
+        else:
+            # Fallback if GPS fails
+            actual_distance = p.distance_meters 
+            
         heritage_sites.append(PlaceDto(
             id=p.id,
             name=p.name,
@@ -35,10 +47,28 @@ def get_home_data(lat: Optional[float] = None, lon: Optional[float] = None):
             longitude=p.longitude,
             category=p.category,
             type=p.type,
-            distance_meters=p.distance_meters
+            distance_meters=actual_distance
         ))
         
+    # Sort the final list so the closest places appear first in the Android UI
+    if lat is not None and lon is not None:
+        heritage_sites.sort(key=lambda x: x.distance_meters or 999999)
+        
     return DynamicDataResponse(heritage_sites=heritage_sites)
+    
+def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
+    """Calculates the distance in meters between two GPS coordinates."""
+    R = 6371000  # Radius of Earth in meters
+    phi_1 = math.radians(lat1)
+    phi_2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi / 2.0) ** 2 + \
+        math.cos(phi_1) * math.cos(phi_2) * math.sin(delta_lambda / 2.0) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return int(R * c)
 
 @app.get("/explore/", response_model=DynamicDataResponse)
 async def get_explore_data(lat: float, lon: float, radius: int = 5000):
