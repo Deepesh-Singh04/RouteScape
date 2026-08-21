@@ -2,6 +2,9 @@ import httpx
 from fastapi import FastAPI
 from typing import List, Optional
 from pydantic import BaseModel
+from sqlmodel import Session, select
+from database import engine
+from models import Place
 
 app = FastAPI()
 
@@ -17,6 +20,25 @@ class PlaceDto(BaseModel):
 class DynamicDataResponse(BaseModel):
     transit_options: List[PlaceDto] = []
     heritage_sites: List[PlaceDto] = []
+
+@app.get("/home-data/", response_model=DynamicDataResponse)
+def get_home_data(lat: Optional[float] = None, lon: Optional[float] = None):
+    with Session(engine) as session:
+        places = session.exec(select(Place)).all()
+        
+    heritage_sites = []
+    for p in places:
+        heritage_sites.append(PlaceDto(
+            id=p.id,
+            name=p.name,
+            latitude=p.latitude,
+            longitude=p.longitude,
+            category=p.category,
+            type=p.type,
+            distance_meters=p.distance_meters
+        ))
+        
+    return DynamicDataResponse(heritage_sites=heritage_sites)
 
 @app.get("/explore/", response_model=DynamicDataResponse)
 async def get_explore_data(lat: float, lon: float, radius: int = 5000):
@@ -35,8 +57,7 @@ async def get_explore_data(lat: float, lon: float, radius: int = 5000):
             response = await client.post(url, data={"data": query}, timeout=20.0)
             response.raise_for_status() 
             osm_data = response.json()
-    except Exception as e:
-        print(f"Overpass API Error: {e}")
+    except Exception:
         return DynamicDataResponse(transit_options=[], heritage_sites=[])
         
     heritage_sites = []
@@ -60,8 +81,7 @@ async def get_explore_data(lat: float, lon: float, radius: int = 5000):
                 category="heritage",
                 type=tags.get("historic", "unknown")
             ))
-        except Exception as item_error:
-            print(f"Skipping malformed element: {item_error}")
+        except Exception:
             continue
             
     return DynamicDataResponse(heritage_sites=heritage_sites)
