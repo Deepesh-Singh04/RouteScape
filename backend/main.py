@@ -30,26 +30,38 @@ async def get_explore_data(lat: float, lon: float, radius: int = 5000):
     """
     url = "http://overpass-api.de/api/interpreter"
     
-    async with httpx.AsyncClient() as client:
-        response = await client.post(url, data={"data": query}, timeout=20.0)
-        osm_data = response.json()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, data={"data": query}, timeout=20.0)
+            response.raise_for_status() 
+            osm_data = response.json()
+    except Exception as e:
+        print(f"Overpass API Error: {e}")
+        return DynamicDataResponse(transit_options=[], heritage_sites=[])
         
     heritage_sites = []
     for element in osm_data.get("elements", []):
-        tags = element.get("tags", {})
-        if "name" not in tags:
+        try:
+            tags = element.get("tags", {})
+            if "name" not in tags:
+                continue
+                
+            element_lat = element.get("lat") or element.get("center", {}).get("lat")
+            element_lon = element.get("lon") or element.get("center", {}).get("lon")
+            
+            if element_lat is None or element_lon is None:
+                continue
+            
+            heritage_sites.append(PlaceDto(
+                id=element["id"],
+                name=tags["name"],
+                latitude=float(element_lat),
+                longitude=float(element_lon),
+                category="heritage",
+                type=tags.get("historic", "unknown")
+            ))
+        except Exception as item_error:
+            print(f"Skipping malformed element: {item_error}")
             continue
             
-        element_lat = element.get("lat") or element.get("center", {}).get("lat")
-        element_lon = element.get("lon") or element.get("center", {}).get("lon")
-        
-        heritage_sites.append(PlaceDto(
-            id=element["id"],
-            name=tags["name"],
-            latitude=element_lat,
-            longitude=element_lon,
-            category="heritage",
-            type=tags.get("historic")
-        ))
-        
     return DynamicDataResponse(heritage_sites=heritage_sites)
