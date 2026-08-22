@@ -60,6 +60,8 @@ import org.osmdroid.views.overlay.milestones.MilestonePixelDistanceLister
 import org.osmdroid.views.overlay.mylocation.IMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 import java.util.Locale
+import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
+import org.osmdroid.util.MapTileIndex
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -109,9 +111,34 @@ fun FullscreenMapView(
         (createDotDrawable(context, "#3B82F6".toColorInt(), 60) as BitmapDrawable).bitmap
     }
 
-    val cartoDbSource = remember(isDarkTheme) {
-        val tileUrl = if (isDarkTheme) "https://a.basemaps.cartocdn.com/dark_all/" else "https://a.basemaps.cartocdn.com/light_all/"
-        XYTileSource("CartoDB", 1, 20, 256, ".png", arrayOf(tileUrl))
+    // UPDATED: High-Contrast Google Maps (Light) & CartoDark (Dark)
+    val mapTileSource = remember(isDarkTheme) {
+        if (isDarkTheme) {
+            XYTileSource(
+                "CartoDark", 1, 20, 256, ".png",
+                arrayOf(
+                    "https://a.basemaps.cartocdn.com/dark_all/",
+                    "https://b.basemaps.cartocdn.com/dark_all/",
+                    "https://c.basemaps.cartocdn.com/dark_all/",
+                    "https://d.basemaps.cartocdn.com/dark_all/"
+                )
+            )
+        } else {
+            // Custom Tile Source to match Google Maps URL parameters
+            object : OnlineTileSourceBase(
+                "GoogleMaps", 1, 20, 256, ".png",
+                arrayOf(
+                    "https://mt0.google.com/vt/lyrs=m&hl=en&",
+                    "https://mt1.google.com/vt/lyrs=m&hl=en&",
+                    "https://mt2.google.com/vt/lyrs=m&hl=en&",
+                    "https://mt3.google.com/vt/lyrs=m&hl=en&"
+                )
+            ) {
+                override fun getTileURLString(pMapTileIndex: Long): String {
+                    return baseUrl + "x=${MapTileIndex.getX(pMapTileIndex)}&y=${MapTileIndex.getY(pMapTileIndex)}&z=${MapTileIndex.getZoom(pMapTileIndex)}"
+                }
+            }
+        }
     }
 
     DisposableEffect(lifecycleOwner, locationOverlayRef) {
@@ -182,7 +209,7 @@ fun FullscreenMapView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 MapView(ctx).apply {
-                    setTileSource(cartoDbSource)
+                    setTileSource(mapTileSource)
                     setMultiTouchControls(true)
                     isTilesScaledToDpi = true
                     zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
@@ -238,8 +265,8 @@ fun FullscreenMapView(
                 }
             },
             update = { mapView ->
-                if (mapView.tileProvider.tileSource.name() != cartoDbSource.name()) {
-                    mapView.setTileSource(cartoDbSource)
+                if (mapView.tileProvider.tileSource.name() != mapTileSource.name()) {
+                    mapView.setTileSource(mapTileSource)
                 }
 
                 if (triggerUserCentering && !isDriveMode) {
@@ -294,7 +321,7 @@ fun FullscreenMapView(
 
                 if (routeData.routes.isNotEmpty()) {
                     val routesToDraw = routeData.routes.withIndex().sortedBy { if (it.index == selectedRouteIndex) 1 else 0 }
-                    
+
                     for ((index, route) in routesToDraw) {
                         val isSelected = index == selectedRouteIndex
 
