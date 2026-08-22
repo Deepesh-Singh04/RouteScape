@@ -1,6 +1,5 @@
 package com.example.transit_app.app.presentation.home.utils
 
-import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -9,12 +8,17 @@ import java.net.ConnectException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.UnknownHostException
+import java.util.Locale
 
-// Added an errorMessage parameter to safely pass offline alerts to the UI
-data class RouteResult(
+data class RoutePath(
     val points: List<GeoPoint> = emptyList(),
     val distanceMeters: Double = 0.0,
     val durationSeconds: Double = 0.0,
+    val instructions: List<String> = emptyList()
+)
+
+data class RouteResult(
+    val routes: List<RoutePath> = emptyList(),
     val errorMessage: String? = null
 )
 
@@ -24,9 +28,7 @@ suspend fun fetchRouteFromOSRM(start: GeoPoint, dest: GeoPoint): RouteResult {
             val urlString = "https://router.project-osrm.org/route/v1/driving/" +
                     "${start.longitude},${start.latitude};" +
                     "${dest.longitude},${dest.latitude}" +
-                    "?overview=full&geometries=geojson"
-
-            Log.d("OSRM_API", "Requesting Route: $urlString")
+                    "?overview=simplified&geometries=geojson&steps=true&alternatives=true"
 
             val connection = URL(urlString).openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
@@ -39,46 +41,58 @@ suspend fun fetchRouteFromOSRM(start: GeoPoint, dest: GeoPoint): RouteResult {
             if (responseCode == HttpURLConnection.HTTP_OK) {
                 val response = connection.inputStream.bufferedReader().use { it.readText() }
                 val jsonObject = JSONObject(response)
-                val routes = jsonObject.optJSONArray("routes")
+                val routesArray = jsonObject.optJSONArray("routes")
 
-                if (routes != null && routes.length() > 0) {
-                    val route = routes.getJSONObject(0)
+                if (routesArray != null && routesArray.length() > 0) {
+                    val parsedRoutes = List(routesArray.length()) { r ->
+                        val route = routesArray.getJSONObject(r)
+                        val distance = route.optDouble("distance", 0.0)
+                        val duration = route.optDouble("duration", 0.0)
 
-                    val distance = route.optDouble("distance", 0.0)
-                    val duration = route.optDouble("duration", 0.0)
+                        val geometry = route.getJSONObject("geometry")
+                        val coordinates = geometry.getJSONArray("coordinates")
+                        val pathPoints = List(coordinates.length()) { i ->
+                            val coord = coordinates.getJSONArray(i)
+                            GeoPoint(coord.getDouble(1), coord.getDouble(0))
+                        }
 
-                    val geometry = route.getJSONObject("geometry")
-                    val coordinates = geometry.getJSONArray("coordinates")
-                    val pathPoints = mutableListOf<GeoPoint>()
+                        val instructionsList = mutableListOf<String>()
+                        val legs = route.optJSONArray("legs")
+                        if (legs != null && legs.length() > 0) {
+                            val steps = legs.getJSONObject(0).optJSONArray("steps")
+                            if (steps != null) {
+                                for (j in 0 until steps.length()) {
+                                    val step = steps.getJSONObject(j)
+                                    val maneuver = step.optJSONObject("maneuver")
+                                    val type = maneuver?.optString("type", "") ?: ""
+                                    val modifier = maneuver?.optString("modifier", "") ?: ""
+                                    val name = step.optString("name", "")
 
-                    for (i in 0 until coordinates.length()) {
-                        val coord = coordinates.getJSONArray(i)
-                        val lon = coord.getDouble(0)
-                        val lat = coord.getDouble(1)
-                        pathPoints.add(GeoPoint(lat, lon))
+                                    var instruction = type.replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.getDefault()) else it.toString() }
+                                    if (modifier.isNotEmpty() && modifier != "straight") instruction += " $modifier"
+                                    if (name.isNotEmpty()) instruction += " onto $name"
+
+                                    instruction = instruction.replace("Depart", "Head")
+                                        .replace("Arrive", "Arrive at destination")
+
+                                    instructionsList.add(instruction)
+                                }
+                            }
+                        }
+                        RoutePath(pathPoints, distance, duration, instructionsList)
                     }
-
-                    RouteResult(pathPoints, distance, duration, null)
+                    RouteResult(routes = parsedRoutes, errorMessage = null)
                 } else {
                     RouteResult(errorMessage = "No valid roads found between these locations.")
                 }
             } else {
                 RouteResult(errorMessage = "Routing server is currently down. Please try again later.")
             }
-
-            // 1. Catches "No DNS / Offline" errors
         } catch (e: UnknownHostException) {
-            Log.e("OSRM_API", "Offline Error: ${e.localizedMessage}")
             RouteResult(errorMessage = "You are offline. Please check your internet connection.")
-
-            // 2. Catches "Network Disabled / Timeout" errors
         } catch (e: ConnectException) {
-            Log.e("OSRM_API", "Connection Error: ${e.localizedMessage}")
             RouteResult(errorMessage = "You are offline. Please check your internet connection.")
-
-            // 3. Catches any other crashes
         } catch (e: Exception) {
-            Log.e("OSRM_API", "Unknown Exception: ${e.localizedMessage}")
             RouteResult(errorMessage = "Unable to fetch street route. Showing straight line.")
         }
     }

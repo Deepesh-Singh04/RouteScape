@@ -1,8 +1,14 @@
 package com.example.transit_app.app.presentation.home
 
 import android.Manifest
+import android.annotation.SuppressLint
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
@@ -26,7 +32,6 @@ import com.example.transit_app.app.presentation.home.components.FullscreenMapVie
 import com.example.transit_app.app.presentation.home.models.DisplayCardItem
 import kotlinx.coroutines.launch
 import org.osmdroid.util.GeoPoint
-import android.annotation.SuppressLint
 
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
@@ -40,7 +45,7 @@ fun HomeScreen(
     var searchQuery by remember { mutableStateOf("") }
     var selectedLocation by remember { mutableStateOf<GeoPoint?>(null) }
     var triggerUserCentering by remember { mutableStateOf(true) }
-    var hasFetchedInitialData by remember { mutableStateOf(false) }
+    var lastFetchedLocation by remember { mutableStateOf<GeoPoint?>(null) }
 
     val uiState by viewModel.uiState.collectAsState()
 
@@ -85,7 +90,7 @@ fun HomeScreen(
     ) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) }
-        ) { paddingValues ->
+        ) { _ ->
             Box(
                 modifier = Modifier.fillMaxSize()
             ) {
@@ -96,12 +101,19 @@ fun HomeScreen(
                     onRouteError = { msg ->
                         scope.launch { snackbarHostState.showSnackbar(msg) }
                     },
-                    onLiveLocationUpdate = { geoPoint ->
-                        if (!hasFetchedInitialData) {
-                            viewModel.fetchExploreData(geoPoint.latitude, geoPoint.longitude)
-                            hasFetchedInitialData = true
+                    onLiveLocationUpdate = { currentGeoPoint ->
+                        if (lastFetchedLocation == null) {
+                            viewModel.fetchExploreData(currentGeoPoint.latitude, currentGeoPoint.longitude)
+                            lastFetchedLocation = currentGeoPoint
+                        } else {
+                            val distanceMoved = lastFetchedLocation!!.distanceToAsDouble(currentGeoPoint)
+                            if (distanceMoved > 1000.0) {
+                                viewModel.fetchExploreData(currentGeoPoint.latitude, currentGeoPoint.longitude)
+                                lastFetchedLocation = currentGeoPoint
+                            }
                         }
-                    }
+                    },
+                    onClearRoute = { selectedLocation = null }
                 )
 
                 Box(
@@ -161,42 +173,49 @@ fun HomeScreen(
                         }
                         is HomeUiState.Success -> {
                             val itemsList = remember(state.data) {
-                                val list = mutableListOf<DisplayCardItem>()
-                                state.data.transit_options.forEach { option ->
-                                    list.add(
-                                        DisplayCardItem(
-                                            title = option.name,
-                                            subtitle = "${option.distanceMeters ?: 0}m • ${option.status ?: "Unknown"}",
-                                            icon = if (option.type == "metro") Icons.Default.Train else Icons.Default.ElectricRickshaw,
-                                            geoPoint = GeoPoint(option.latitude, option.longitude)
+                                buildList {
+                                    state.data.transit_options.forEach { option ->
+                                        add(
+                                            DisplayCardItem(
+                                                title = option.name,
+                                                subtitle = "${option.distanceMeters ?: 0}m • ${option.status ?: "Unknown"}",
+                                                icon = if (option.type == "metro") Icons.Default.Train else Icons.Default.ElectricRickshaw,
+                                                geoPoint = GeoPoint(option.latitude, option.longitude)
+                                            )
                                         )
-                                    )
-                                }
-                                state.data.heritage_sites.forEach { site ->
-                                    list.add(
-                                        DisplayCardItem(
-                                            title = site.name,
-                                            subtitle = "${site.distanceMeters ?: 0}m • ${site.category}",
-                                            icon = Icons.Default.AccountBalance,
-                                            geoPoint = GeoPoint(site.latitude, site.longitude)
+                                    }
+                                    state.data.heritage_sites.forEach { site ->
+                                        add(
+                                            DisplayCardItem(
+                                                title = site.name,
+                                                subtitle = "${site.distanceMeters ?: 0}m • ${site.category}",
+                                                icon = Icons.Default.AccountBalance,
+                                                geoPoint = GeoPoint(site.latitude, site.longitude)
+                                            )
                                         )
-                                    )
+                                    }
                                 }
-                                list
                             }
 
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            // The new animation wrapper for the bottom cards
+                            AnimatedVisibility(
+                                visible = itemsList.isNotEmpty(),
+                                enter = slideInVertically(initialOffsetY = { it / 2 }) + fadeIn(),
+                                exit = slideOutVertically(targetOffsetY = { it / 2 }) + fadeOut()
                             ) {
-                                items(
-                                    items = itemsList,
-                                    key = { it.title }
-                                ) { item ->
-                                    FloatingPlaceCard(
-                                        item = item,
-                                        onClick = { selectedLocation = item.geoPoint }
-                                    )
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(
+                                        items = itemsList,
+                                        key = { it.title }
+                                    ) { item ->
+                                        FloatingPlaceCard(
+                                            item = item,
+                                            onClick = { selectedLocation = item.geoPoint }
+                                        )
+                                    }
                                 }
                             }
                         }
